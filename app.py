@@ -3,73 +3,21 @@ import pandas as pd
 import re
 import string
 import io
-import xlsxwriter
 import time
+import xlsxwriter
 
-# --- 1. CONFIGURATION & DARK THEME CSS ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(
-    page_title="freemir CS Support",
+    page_title="Freemir CS Support",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS untuk Tampilan Dark Mode & Sidebar Gradient
-st.markdown("""
-    <style>
-    /* Main Background - Dark Color */
-    .stApp {
-        background-color: #0E1117;
-        color: #FAFAFA;
-    }
-    
-    /* Sidebar Gradient Background */
-    section[data-testid="stSidebar"] {
-        background: rgb(2,0,36);
-        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
-    }
-
-    /* Metric Cards Styling (Dark Glassmorphism) */
-    div[data-testid="metric-container"] {
-        background-color: #1E293B;
-        border: 1px solid #334155;
-        padding: 15px;
-        border-radius: 10px;
-        color: white;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
-    }
-    
-    /* Button Styling */
-    .stButton>button {
-        width: 100%;
-        background-color: #3B82F6; /* Blue freemir tone */
-        color: white;
-        border-radius: 8px;
-        height: 3em;
-        font-weight: 600;
-        border: none;
-    }
-    .stButton>button:hover {
-        background-color: #2563EB;
-    }
-
-    /* File Uploader Dark Style */
-    div[data-testid="stFileUploader"] {
-        background-color: #1E293B;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px dashed #475569;
-    }
-    
-    /* Table/Dataframe Header Color */
-    thead tr th:first-child {display:none}
-    tbody th {display:none}
-    </style>
-""", unsafe_allow_html=True)
-
-# --- 2. LOGIC FUNCTIONS ---
+# --- 2. CORE LOGIC FUNCTIONS ---
 
 def generate_reason_code(n):
+    """Membuat kode urut A, B, ... Z, AA, dst."""
     code = ""
     while n >= 0:
         code = string.ascii_uppercase[n % 26] + code
@@ -77,6 +25,7 @@ def generate_reason_code(n):
     return code[::-1]
 
 def clean_and_split_sku(sku_raw):
+    """Membersihkan SKU: split +, enter, dan FR yang menempel."""
     if pd.isna(sku_raw):
         return []
     s = str(sku_raw)
@@ -87,18 +36,19 @@ def clean_and_split_sku(sku_raw):
 
 @st.cache_data(show_spinner=False)
 def process_data(uploaded_file):
+    """Fungsi utama pengolahan data."""
     output = io.BytesIO()
 
     try:
         df = pd.read_excel(uploaded_file, sheet_name="Detail", usecols="C,H,J")
     except ValueError:
-        return None, None, None, "Error: Sheet 'Detail' not found. Please check your file."
+        return None, None, None, "Error: Sheet 'Detail' tidak ditemukan. Cek file Excel Anda."
     except Exception as e:
-        return None, None, None, f"Error reading file: {e}"
+        return None, None, None, f"Error membaca file: {e}"
 
     df.columns = ['Order_ID', 'Raw_SKU', 'Reason']
     
-    # --- PROCESSING ---
+    # --- Step 1: Cleaning ---
     expanded_data = []
     for _, row in df.iterrows():
         order_id = row['Order_ID']
@@ -115,14 +65,14 @@ def process_data(uploaded_file):
 
     df_raw = pd.DataFrame(expanded_data)
     if df_raw.empty:
-        return None, None, None, "No valid SKUs (starting with 'FR') found."
+        return None, None, None, "Tidak ada data SKU valid (awalan 'FR') ditemukan."
 
-    # --- PIVOT & STATS ---
+    # --- Step 2: Pivot & Stats ---
     pivot_df = pd.crosstab(df_raw['SKU'], df_raw['Reason'])
     pivot_df['Total Problems'] = pivot_df.sum(axis=1)
     pivot_df = pivot_df.sort_values(by='Total Problems', ascending=False)
 
-    # --- CODIFICATION ---
+    # --- Step 3: Codification ---
     calc_cols = ['Total Problems']
     reason_columns = [col for col in pivot_df.columns if col not in calc_cols]
     
@@ -153,10 +103,11 @@ def process_data(uploaded_file):
     total_row['SKU'] = 'TOTAL'
     df_summary_final = pd.concat([df_summary, total_row], ignore_index=True)
 
+    # Add Sequence Number
     df_summary_final.insert(0, 'No', range(1, len(df_summary_final) + 1))
     df_summary_final.iloc[-1, 0] = ''
 
-    # --- PREPARE LEGEND FOR WEB DISPLAY & EXCEL ---
+    # Prepare Legend Data
     legend_rows = []
     for code in sorted_codes:
         original_reason = code_map[code]
@@ -168,12 +119,12 @@ def process_data(uploaded_file):
         })
     df_legend = pd.DataFrame(legend_rows)
 
-    # --- EXCEL WRITING ---
+    # --- Step 4: Excel Export ---
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         wb = writer.book
         ws = wb.add_worksheet('Integrated Report')
         
-        # Yellow Headers (Standard Excel)
+        # Styles
         fmt_header = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bold': True, 'bg_color': '#FFEB3B', 'text_wrap': True})
         fmt_center = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
         fmt_left   = wb.add_format({'align': 'left', 'valign': 'vcenter', 'border': 1})
@@ -181,6 +132,7 @@ def process_data(uploaded_file):
 
         col_raw, col_sum, col_leg = 0, len(df_raw.columns) + 2, len(df_raw.columns) + 2 + len(df_summary_final.columns) + 2
 
+        # Write Tables
         # 1. Raw Data
         for i, col in enumerate(df_raw.columns): ws.write(0, col_raw + i, col, fmt_header)
         for r, row in df_raw.iterrows():
@@ -208,82 +160,99 @@ def process_data(uploaded_file):
 
     output.seek(0)
     
+    # KPI Stats
     stats = {
         'total_orders': df_raw['Order ID'].nunique(),
         'total_issues': len(df_raw),
-        'total_skus': df_raw['SKU'].nunique()
+        'unique_skus': df_raw['SKU'].nunique()
     }
     
     return output, stats, df_legend, "Success"
 
-# --- 3. SIDEBAR UI ---
+# --- 3. UI LAYOUT ---
+
+# Sidebar
 with st.sidebar:
-    st.title("freemir CS")
-    st.markdown("### Customer Service Support")
+    st.header("Freemir CS Support")
     st.markdown("---")
-    st.markdown("""
+    st.info("""
     **Panduan Penggunaan:**
-    1. Siapkan file Excel (format `.xlsx`).
-    2. Pastikan ada sheet bernama **"Detail"**.
-    3. Upload file di sebelah kanan.
-    4. Tunggu analisa selesai.
+    1.  Siapkan file Excel `.xlsx` / `.xls`.
+    2.  Pastikan sheet bernama **"Detail"**.
+    3.  Upload file di panel utama.
+    4.  Klik tombol 'Mulai Analisa'.
     """)
-    st.caption("© 2024 Freemir Data Team")
+    st.markdown("---")
+    st.caption("v3.0 Final Stable • Freemir Data Team")
 
-# --- 4. MAIN UI ---
-st.title("🛡️ freemir Customer Service Support")
-st.markdown("### Automated SKU Issue Analyzer")
-st.markdown("---")
+# Main Page
+st.title("🛡️ Freemir Customer Service Support")
+st.markdown("##### Automated SKU Issue Analyzer & Reporting Tool")
+st.divider()
 
-uploaded_file = st.file_uploader("Upload File 'Order-CS.xlsx' disini", type=['xlsx', 'xls'])
+# File Uploader
+uploaded_file = st.file_uploader("Upload File Laporan Order (Format Excel)", type=['xlsx', 'xls'])
 
 if uploaded_file:
-    with st.spinner('⚙️ Sedang menganalisa data...'):
-        time.sleep(0.8) # Efek visual
-        excel_data, stats, df_legend, status = process_data(uploaded_file)
-
-    if status == "Success":
-        st.success("✅ Analisa Selesai!")
+    # Tombol Action
+    if st.button("🚀 Mulai Analisa Data", type="primary", use_container_width=True):
         
-        # --- METRICS ROW (3 Column) ---
-        c1, c2, c3 = st.columns(3)
-        with c1: st.metric("Total Unique Orders", stats['total_orders'])
-        with c2: st.metric("Total Issues Found", stats['total_issues'])
-        with c3: st.metric("Problematic SKUs", stats['total_skus'])
+        # Interactive Status Container (New Feature)
+        with st.status("Sedang memproses data...", expanded=True) as status:
+            st.write("📂 Membaca file Excel...")
+            time.sleep(0.5) 
+            st.write("🧹 Membersihkan & Memisahkan SKU...")
+            time.sleep(0.5)
+            
+            # Run Logic
+            excel_data, stats, df_legend, msg = process_data(uploaded_file)
+            
+            if msg == "Success":
+                st.write("📊 Menghitung statistik & pivot...")
+                time.sleep(0.3)
+                st.write("✅ Selesai!")
+                status.update(label="Analisa Berhasil!", state="complete", expanded=False)
+                
+                st.divider()
+                
+                # --- DASHBOARD METRICS ---
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Unique Orders", f"{stats['total_orders']:,}")
+                col2.metric("Total Issues Found", f"{stats['total_issues']:,}")
+                col3.metric("Problematic SKUs", f"{stats['unique_skus']:,}")
+                
+                st.divider()
 
-        # --- DOWNLOAD BUTTON ---
-        st.markdown("### 📥 Download Report")
-        col_dl_1, col_dl_2 = st.columns([3, 1])
-        with col_dl_1:
-            st.info("File output mencakup: Raw Data Cleaned, Summary Pivot, dan Legend Table.")
-        with col_dl_2:
-             st.download_button(
-                label="Download Excel",
-                data=excel_data,
-                file_name=f"Freemir_SKU_Report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-             
-        # --- TABLE DISPLAY (NEW REQUIREMENT) ---
-        st.markdown("---")
-        st.subheader("📋 Issue Summary & Legend Details")
-        st.markdown("Berikut adalah rekapitulasi total masalah berdasarkan kategori (Data dari kolom Legend):")
-        
-        # Menampilkan Tabel df_legend di Web
-        st.dataframe(
-            df_legend, 
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Code": st.column_config.TextColumn("Kode", width="small"),
-                "Cancel / Refund Detail": st.column_config.TextColumn("Detail Masalah", width="large"),
-                "Total by SKU": st.column_config.NumberColumn("Total Issues", format="%d"),
-                "Total by Order": st.column_config.NumberColumn("Total Orders", format="%d"),
-            }
-        )
+                # --- TABLE PREVIEW ---
+                st.subheader("📋 Rincian Masalah (Live Preview)")
+                st.markdown("Tabel berikut menunjukkan kode masalah dan jumlah kejadiannya secara real-time.")
+                
+                st.dataframe(
+                    df_legend,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Code": st.column_config.TextColumn("Kode", width="small"),
+                        "Cancel / Refund Detail": st.column_config.TextColumn("Detail Masalah"),
+                        "Total by SKU": st.column_config.NumberColumn("Total Issues"),
+                        "Total by Order": st.column_config.NumberColumn("Unique Orders"),
+                    }
+                )
 
-    else:
-        st.error(status)
-else:
-    st.info("👋 Silakan upload file Excel untuk memulai.")
+                # --- DOWNLOAD BUTTON ---
+                st.divider()
+                st.success("Laporan siap diunduh!")
+                
+                col_dl1, col_dl2 = st.columns([1, 1])
+                with col_dl1:
+                    st.download_button(
+                        label="📥 Download Laporan Excel",
+                        data=excel_data,
+                        file_name="Freemir_Integrated_Report.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+            
+            else:
+                status.update(label="Terjadi Kesalahan", state="error")
+                st.error(msg)
