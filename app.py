@@ -17,7 +17,7 @@ st.set_page_config(
 # --- 2. CORE LOGIC FUNCTIONS ---
 
 def generate_reason_code(n):
-    """Membuat kode urut A, B, ... Z, AA, dst."""
+    """Generates sequential codes A, B, ... Z, AA, etc."""
     code = ""
     while n >= 0:
         code = string.ascii_uppercase[n % 26] + code
@@ -25,7 +25,7 @@ def generate_reason_code(n):
     return code[::-1]
 
 def clean_and_split_sku(sku_raw):
-    """Membersihkan SKU: split +, enter, dan FR yang menempel."""
+    """Cleans SKUs: splits +, newlines, and concatenated 'FR' prefixes."""
     if pd.isna(sku_raw):
         return []
     s = str(sku_raw)
@@ -36,15 +36,15 @@ def clean_and_split_sku(sku_raw):
 
 @st.cache_data(show_spinner=False)
 def process_data(uploaded_file):
-    """Fungsi utama pengolahan data."""
+    """Main data processing function."""
     output = io.BytesIO()
 
     try:
         df = pd.read_excel(uploaded_file, sheet_name="Detail", usecols="C,H,J")
     except ValueError:
-        return None, None, None, "Error: Sheet 'Detail' tidak ditemukan. Cek file Excel Anda."
+        return None, None, None, "Error: Sheet 'Detail' not found. Please check your Excel file."
     except Exception as e:
-        return None, None, None, f"Error membaca file: {e}"
+        return None, None, None, f"Error reading file: {e}"
 
     df.columns = ['Order_ID', 'Raw_SKU', 'Reason']
     
@@ -65,7 +65,7 @@ def process_data(uploaded_file):
 
     df_raw = pd.DataFrame(expanded_data)
     if df_raw.empty:
-        return None, None, None, "Tidak ada data SKU valid (awalan 'FR') ditemukan."
+        return None, None, None, "No valid SKUs (starting with 'FR') found in the data."
 
     # --- Step 2: Pivot & Stats ---
     pivot_df = pd.crosstab(df_raw['SKU'], df_raw['Reason'])
@@ -176,14 +176,14 @@ with st.sidebar:
     st.header("Freemir CS Support")
     st.markdown("---")
     st.info("""
-    **Panduan Penggunaan:**
-    1.  Siapkan file Excel `.xlsx` / `.xls`.
-    2.  Pastikan sheet bernama **"Detail"**.
-    3.  Upload file di panel utama.
-    4.  Klik tombol 'Mulai Analisa'.
+    **Instructions:**
+    1.  Prepare your Order Excel file (`.xlsx` / `.xls`).
+    2.  Ensure it has a sheet named **"Detail"**.
+    3.  Upload the file in the main panel.
+    4.  Analysis starts automatically.
     """)
     st.markdown("---")
-    st.caption("v3.0 Final Stable • Freemir Data Team")
+    st.caption("v4.0 English Edition • Freemir Data Team")
 
 # Main Page
 st.title("🛡️ Freemir Customer Service Support")
@@ -191,68 +191,68 @@ st.markdown("##### Automated SKU Issue Analyzer & Reporting Tool")
 st.divider()
 
 # File Uploader
-uploaded_file = st.file_uploader("Upload File Laporan Order (Format Excel)", type=['xlsx', 'xls'])
+uploaded_file = st.file_uploader("Upload 'Order-CS.xlsx' File", type=['xlsx', 'xls'])
 
+# AUTOMATIC EXECUTION (No Button)
 if uploaded_file:
-    # Tombol Action
-    if st.button("🚀 Mulai Analisa Data", type="primary", use_container_width=True):
+    
+    # Status Container for Feedback
+    with st.status("Processing data...", expanded=True) as status:
+        st.write("📂 Reading Excel file...")
+        time.sleep(0.3) # Short visual delay
+        st.write("🧹 Cleaning and Splitting SKUs...")
+        time.sleep(0.3)
         
-        # Interactive Status Container (New Feature)
-        with st.status("Sedang memproses data...", expanded=True) as status:
-            st.write("📂 Membaca file Excel...")
-            time.sleep(0.5) 
-            st.write("🧹 Membersihkan & Memisahkan SKU...")
-            time.sleep(0.5)
+        # Run Logic
+        excel_data, stats, df_legend, msg = process_data(uploaded_file)
+        
+        if msg == "Success":
+            st.write("📊 Calculating statistics and generating report...")
+            time.sleep(0.3)
+            status.update(label="Analysis Complete!", state="complete", expanded=False)
             
-            # Run Logic
-            excel_data, stats, df_legend, msg = process_data(uploaded_file)
+            st.divider()
             
-            if msg == "Success":
-                st.write("📊 Menghitung statistik & pivot...")
-                time.sleep(0.3)
-                st.write("✅ Selesai!")
-                status.update(label="Analisa Berhasil!", state="complete", expanded=False)
-                
-                st.divider()
-                
-                # --- DASHBOARD METRICS ---
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Total Unique Orders", f"{stats['total_orders']:,}")
-                col2.metric("Total Issues Found", f"{stats['total_issues']:,}")
-                col3.metric("Problematic SKUs", f"{stats['unique_skus']:,}")
-                
-                st.divider()
+            # --- DASHBOARD METRICS ---
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Unique Orders", f"{stats['total_orders']:,}")
+            col2.metric("Total Issues Found", f"{stats['total_issues']:,}")
+            col3.metric("Problematic SKUs", f"{stats['unique_skus']:,}")
+            
+            st.divider()
 
-                # --- TABLE PREVIEW ---
-                st.subheader("📋 Rincian Masalah (Live Preview)")
-                st.markdown("Tabel berikut menunjukkan kode masalah dan jumlah kejadiannya secara real-time.")
-                
-                st.dataframe(
-                    df_legend,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Code": st.column_config.TextColumn("Kode", width="small"),
-                        "Cancel / Refund Detail": st.column_config.TextColumn("Detail Masalah"),
-                        "Total by SKU": st.column_config.NumberColumn("Total Issues"),
-                        "Total by Order": st.column_config.NumberColumn("Unique Orders"),
-                    }
+            # --- TABLE PREVIEW ---
+            st.subheader("📋 Issue Breakdown (Live Preview)")
+            st.markdown("This table shows the codification and frequency of issues found.")
+            
+            st.dataframe(
+                df_legend,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Code": st.column_config.TextColumn("Code", width="small"),
+                    "Cancel / Refund Detail": st.column_config.TextColumn("Issue Detail"),
+                    "Total by SKU": st.column_config.NumberColumn("Total Issues"),
+                    "Total by Order": st.column_config.NumberColumn("Affected Orders"),
+                }
+            )
+
+            # --- DOWNLOAD BUTTON ---
+            st.divider()
+            st.success("Report is ready for download!")
+            
+            col_dl1, col_dl2 = st.columns([2, 1])
+            with col_dl1:
+                st.info("The downloaded Excel includes: Raw Data, Summary Pivot, and Legend Table.")
+            with col_dl2:
+                st.download_button(
+                    label="📥 Download Excel Report",
+                    data=excel_data,
+                    file_name="Freemir_Integrated_Report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
                 )
-
-                # --- DOWNLOAD BUTTON ---
-                st.divider()
-                st.success("Laporan siap diunduh!")
-                
-                col_dl1, col_dl2 = st.columns([1, 1])
-                with col_dl1:
-                    st.download_button(
-                        label="📥 Download Laporan Excel",
-                        data=excel_data,
-                        file_name="Freemir_Integrated_Report.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-            
-            else:
-                status.update(label="Terjadi Kesalahan", state="error")
-                st.error(msg)
+        
+        else:
+            status.update(label="Error Occurred", state="error")
+            st.error(msg)
