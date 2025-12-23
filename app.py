@@ -6,52 +6,68 @@ import io
 import xlsxwriter
 import time
 
-# --- PAGE CONFIGURATION & CSS STYLING ---
+# --- 1. CONFIGURATION & DARK THEME CSS ---
 st.set_page_config(
-    page_title="SKU Analytics Pro",
-    page_icon="📈",
+    page_title="freemir CS Support",
+    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for Professional Look
+# Custom CSS untuk Tampilan Dark Mode & Sidebar Gradient
 st.markdown("""
     <style>
-    .main {
-        background-color: #f8f9fa;
+    /* Main Background - Dark Color */
+    .stApp {
+        background-color: #0E1117;
+        color: #FAFAFA;
     }
+    
+    /* Sidebar Gradient Background */
+    section[data-testid="stSidebar"] {
+        background: rgb(2,0,36);
+        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+    }
+
+    /* Metric Cards Styling (Dark Glassmorphism) */
+    div[data-testid="metric-container"] {
+        background-color: #1E293B;
+        border: 1px solid #334155;
+        padding: 15px;
+        border-radius: 10px;
+        color: white;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+    }
+    
+    /* Button Styling */
     .stButton>button {
         width: 100%;
-        background-color: #0056b3;
+        background-color: #3B82F6; /* Blue freemir tone */
         color: white;
-        border-radius: 5px;
+        border-radius: 8px;
         height: 3em;
-        font-weight: bold;
-    }
-    .stButton>button:hover {
-        background-color: #004494;
+        font-weight: 600;
         border: none;
     }
-    .metric-card {
-        background-color: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        text-align: center;
+    .stButton>button:hover {
+        background-color: #2563EB;
     }
-    h1, h2, h3 {
-        color: #2c3e50;
-    }
+
+    /* File Uploader Dark Style */
     div[data-testid="stFileUploader"] {
-        background-color: white;
+        background-color: #1E293B;
         padding: 20px;
         border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border: 1px dashed #475569;
     }
+    
+    /* Table/Dataframe Header Color */
+    thead tr th:first-child {display:none}
+    tbody th {display:none}
     </style>
 """, unsafe_allow_html=True)
 
-# --- LOGIC FUNCTIONS ---
+# --- 2. LOGIC FUNCTIONS ---
 
 def generate_reason_code(n):
     code = ""
@@ -71,15 +87,14 @@ def clean_and_split_sku(sku_raw):
 
 @st.cache_data(show_spinner=False)
 def process_data(uploaded_file):
-    # Output buffer
     output = io.BytesIO()
 
     try:
         df = pd.read_excel(uploaded_file, sheet_name="Detail", usecols="C,H,J")
     except ValueError:
-        return None, None, "Error: Sheet 'Detail' not found. Please check your file."
+        return None, None, None, "Error: Sheet 'Detail' not found. Please check your file."
     except Exception as e:
-        return None, None, f"Error reading file: {e}"
+        return None, None, None, f"Error reading file: {e}"
 
     df.columns = ['Order_ID', 'Raw_SKU', 'Reason']
     
@@ -100,7 +115,7 @@ def process_data(uploaded_file):
 
     df_raw = pd.DataFrame(expanded_data)
     if df_raw.empty:
-        return None, None, "No valid SKUs (starting with 'FR') found."
+        return None, None, None, "No valid SKUs (starting with 'FR') found."
 
     # --- PIVOT & STATS ---
     pivot_df = pd.crosstab(df_raw['SKU'], df_raw['Reason'])
@@ -141,7 +156,7 @@ def process_data(uploaded_file):
     df_summary_final.insert(0, 'No', range(1, len(df_summary_final) + 1))
     df_summary_final.iloc[-1, 0] = ''
 
-    # Legend Data
+    # --- PREPARE LEGEND FOR WEB DISPLAY & EXCEL ---
     legend_rows = []
     for code in sorted_codes:
         original_reason = code_map[code]
@@ -158,11 +173,11 @@ def process_data(uploaded_file):
         wb = writer.book
         ws = wb.add_worksheet('Integrated Report')
         
-        # Formats
-        fmt_header = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bold': True, 'bg_color': '#FFEB3B', 'text_wrap': True}) # Yellow 300
+        # Yellow Headers (Standard Excel)
+        fmt_header = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bold': True, 'bg_color': '#FFEB3B', 'text_wrap': True})
         fmt_center = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
         fmt_left   = wb.add_format({'align': 'left', 'valign': 'vcenter', 'border': 1})
-        fmt_total  = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bold': True, 'bg_color': '#FFF59D'}) # Light Yellow
+        fmt_total  = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bold': True, 'bg_color': '#FFF59D'})
 
         col_raw, col_sum, col_leg = 0, len(df_raw.columns) + 2, len(df_raw.columns) + 2 + len(df_summary_final.columns) + 2
 
@@ -193,75 +208,82 @@ def process_data(uploaded_file):
 
     output.seek(0)
     
-    # Return everything needed for dashboard
     stats = {
         'total_orders': df_raw['Order ID'].nunique(),
         'total_issues': len(df_raw),
-        'total_skus': df_raw['SKU'].nunique(),
-        'top_issue': df_legend.iloc[0]['Cancel / Refund Detail'] if not df_legend.empty else "N/A"
+        'total_skus': df_raw['SKU'].nunique()
     }
     
-    return output, stats, "Success"
+    return output, stats, df_legend, "Success"
 
-# --- SIDEBAR UI ---
+# --- 3. SIDEBAR UI ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/1087/1087815.png", width=80)
-    st.title("SKU Analyzer")
+    st.title("freemir CS")
+    st.markdown("### Customer Service Support")
     st.markdown("---")
     st.markdown("""
-    **Instructions:**
-    1. Prepare your Excel file.
-    2. Ensure sheet name is **"Detail"**.
-    3. Columns needed:
-       - `C`: Order ID
-       - `H`: SKU (Acuan)
-       - `J`: Refund Reason
-    4. Upload and wait for analysis.
+    **Panduan Penggunaan:**
+    1. Siapkan file Excel (format `.xlsx`).
+    2. Pastikan ada sheet bernama **"Detail"**.
+    3. Upload file di sebelah kanan.
+    4. Tunggu analisa selesai.
     """)
-    st.info("v2.0 Professional Edition")
+    st.caption("© 2024 Freemir Data Team")
 
-# --- MAIN UI ---
-st.title("📊 SKU Issue Analytics Dashboard")
-st.markdown("Transform raw order reports into actionable insights in seconds.")
+# --- 4. MAIN UI ---
+st.title("🛡️ freemir Customer Service Support")
+st.markdown("### Automated SKU Issue Analyzer")
 st.markdown("---")
 
-uploaded_file = st.file_uploader("Drop your 'Order-CS.xlsx' here to begin analysis", type=['xlsx', 'xls'])
+uploaded_file = st.file_uploader("Upload File 'Order-CS.xlsx' disini", type=['xlsx', 'xls'])
 
 if uploaded_file:
-    with st.spinner('⚙️ Processing and cleaning data...'):
-        # Add a slight delay for visual effect
-        time.sleep(0.8)
-        excel_data, stats, status = process_data(uploaded_file)
+    with st.spinner('⚙️ Sedang menganalisa data...'):
+        time.sleep(0.8) # Efek visual
+        excel_data, stats, df_legend, status = process_data(uploaded_file)
 
     if status == "Success":
-        # --- DASHBOARD SECTION ---
-        st.success("✅ Analysis Complete!")
+        st.success("✅ Analisa Selesai!")
         
-        # Metrics Row
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric("Unique Orders", stats['total_orders'])
-        with c2: st.metric("Total Issues", stats['total_issues'])
-        with c3: st.metric("Unique SKUs", stats['total_skus'])
-        with c4: st.metric("Top Complaint", stats['top_issue'][:20]+"...")
+        # --- METRICS ROW (3 Column) ---
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("Total Unique Orders", stats['total_orders'])
+        with c2: st.metric("Total Issues Found", stats['total_issues'])
+        with c3: st.metric("Problematic SKUs", stats['total_skus'])
 
+        # --- DOWNLOAD BUTTON ---
         st.markdown("### 📥 Download Report")
-        
-        col_left, col_right = st.columns([2, 1])
-        
-        with col_left:
-            st.info("The report includes Raw Data, Summary Pivot, and Legend codes in one integrated file.")
-        
-        with col_right:
-            st.download_button(
-                label="📥 Download Excel Report",
+        col_dl_1, col_dl_2 = st.columns([3, 1])
+        with col_dl_1:
+            st.info("File output mencakup: Raw Data Cleaned, Summary Pivot, dan Legend Table.")
+        with col_dl_2:
+             st.download_button(
+                label="Download Excel",
                 data=excel_data,
-                file_name=f"SKU_Analysis_Report.xlsx",
+                file_name=f"Freemir_SKU_Report.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
+             
+        # --- TABLE DISPLAY (NEW REQUIREMENT) ---
+        st.markdown("---")
+        st.subheader("📋 Issue Summary & Legend Details")
+        st.markdown("Berikut adalah rekapitulasi total masalah berdasarkan kategori (Data dari kolom Legend):")
+        
+        # Menampilkan Tabel df_legend di Web
+        st.dataframe(
+            df_legend, 
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Code": st.column_config.TextColumn("Kode", width="small"),
+                "Cancel / Refund Detail": st.column_config.TextColumn("Detail Masalah", width="large"),
+                "Total by SKU": st.column_config.NumberColumn("Total Issues", format="%d"),
+                "Total by Order": st.column_config.NumberColumn("Total Orders", format="%d"),
+            }
+        )
 
     else:
         st.error(status)
 else:
-    # Placeholder when no file is uploaded
-    st.info("👋 Waiting for file upload to start analysis.")
+    st.info("👋 Silakan upload file Excel untuk memulai.")
